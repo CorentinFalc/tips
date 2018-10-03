@@ -18,3 +18,186 @@ DROP TABLE if exists temp_split;
 					AND st_intersects(rl.geom, n.geom))as v_dump
 			Where v_dump.gid = tt_river.gid
 		;', i_river, i_point);
+
+
+
+
+--Complete function returning a correct amount of split data
+--DROP FUNCTION public.stsirs_D4_splitDam(text,text,text);
+Create or Replace function public.stsirs_D4_splitDam(i_point text, i_river text, r_new_river text)
+	RETURNS void AS
+	--Fonction de découpage des rivières par des barrages.
+	--Paramètres entrée : couche barrage +  couche rivière
+	--Paramètres sortie : couche rivière découpées
+	--Les entités nouvellesment créées sont insérées dans la table définie en sortie
+$BODY$
+	DECLARE
+		v_id integer;--Identifiant unique des rivière
+		v_geom geometry;--Geom rivières
+		v_gid integer;--gid rivières
+		
+		v2_id integer;--idem pour comparer
+		v2_geom geometry;
+		v2_gid integer;
+
+		v_diff geometry;--Nouvelle geométrie des entités modifiées
+
+		cpt_serial_ttemp integer;--Compteur temporaire
+	BEGIN
+		--1/ Création de la table en sortie
+	Execute format ('Create table IF NOT EXISTS %1$s as 
+						Select * from %2$s;
+					Delete From %1$s;', r_new_river, i_river);
+
+		--2/ Création de la table temporaire pour stocker les informations	
+	Execute format ('
+		DROP TABLE if exists temp_split; 
+		CREATE  TEMPORARY TABLE IF NOT EXISTS temp_split as
+			Select 
+				ROW_NUMBER() OVER() as unique_id, 
+				geom,
+				v_dump.gid
+			From
+				(Select rL.gid
+					From %1$s rl , %2$s n
+					Where n.nodetype = ''Dam''
+					AND st_intersects(rl.geom, n.geom)
+					Group By rl.gid 
+					having count(rl.gid) >1)as tt_river,
+				(Select 
+					(ST_DUMP(st_split(st_snap(rl.geom, n.geom, 0.1), n.geom))).geom as geom, rl.gid as gid
+					From %1$s rl , %2$s n
+					Where n.nodetype = ''Dam''
+					AND st_intersects(rl.geom, n.geom))as v_dump
+			Where v_dump.gid = tt_river.gid
+		;', i_river, i_point);
+		
+
+		Select max(unique_id) From temp_split 
+			INTO cpt_serial_ttemp;
+			--3/ Parcours des données split pour vérifier les données supperposées
+		For v_id, v_geom, v_gid in Select * from temp_split LOOP
+			for v2_id, v2_geom, v2_gid in Select * From temp_split LOOP
+				IF (v_id != v2_id AND st_overlaps(v_geom, v2_geom)) THEN
+					--4/ Récupération de l'intersection entre les superposition
+					Select ST_intersection(ts1.geom, ts2.geom)
+					FROM temp_split ts1, temp_split ts2
+					Where ts1.unique_id = v_id and ts2.unique_id = v2_id
+					INTO v_diff;
+					cpt = cpt+1;
+					cpt_serial_ttemp = cpt_serial_ttemp +1;
+					INSERT INTO temp_split values (cpt_serial_ttemp, v_diff, v_gid);
+					Delete From temp_split where unique_id = v_id;
+					Delete From temp_split where unique_id = v2_id;
+				END IF;
+			END LOOP;
+		END LOOP;
+			--5/ Insertion des données dans la table en sortie
+		Execute format ('INSERT INTO %1$s (
+				gid,
+				geom,
+				objectid,
+				object_id,
+				dfdd,
+				rn_i_id,
+				wcourse_id,
+				nam,
+				lan,
+				rex,
+				hyp,
+				loc,
+				fun,
+				nvs,
+				length,
+				tr,
+				strahler,
+				longpath,
+				maindr_cls,
+				maindr_id,
+				cum_len,
+				nextdownid,
+				fnode,
+				tnode,
+				pente,
+				cgnelin,
+				surfc,
+				beglifever,
+				endlifever,
+				updat_by,
+				updat_when,
+				ref_topo,
+				inspire_id,
+				nextupid,
+				mswfdcode,
+				euwfdcode,
+				erm_id,
+				river_id,
+				mc,
+				zhyd,
+				catch_area,
+				drain_id,
+				pfafsteter,
+				shape_leng
+			)
+		Select 
+				ROW_NUMBER() OVER(),
+				ST_MULTI(ts.geom),
+				objectid,
+				object_id,
+				dfdd,
+				rn_i_id,
+				wcourse_id,
+				nam,
+				lan,
+				rex,
+				hyp,
+				loc,
+				fun,
+				nvs,
+				length,
+				tr,
+				strahler,
+				longpath,
+				maindr_cls,
+				maindr_id,
+				cum_len,
+				nextdownid,
+				fnode,
+				tnode,
+				pente,
+				cgnelin,
+				surfc,
+				beglifever,
+				endlifever,
+				updat_by,
+				updat_when,
+				ref_topo,
+				inspire_id,
+				nextupid,
+				mswfdcode,
+				euwfdcode,
+				erm_id,
+				river_id,
+				mc,
+				zhyd,
+				catch_area,
+				drain_id,
+				pfafsteter,
+				shape_leng
+		From %2$s rl
+		Join temp_split ts on ts.gid = rl.gid;', r_new_river, i_river
+
+		);
+
+
+		RETURN;
+	END;
+$BODY$
+	LANGUAGE 'plpgsql';
+
+
+
+	--Lancement de la fonction avec les paramètres
+Select * from public.stsirs_D4_splitDam('sandbox.test_rhone_nodes', 'sandbox.test_rhone_river_net_l', 'sandbox.river_net_l_v2');
+	--Récupération des données splités
+select * from sandbox.river_net_l_v2
