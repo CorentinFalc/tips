@@ -1,0 +1,20 @@
+DROP TABLE if exists temp_split; 
+		CREATE  TEMPORARY TABLE IF NOT EXISTS temp_split as
+			Select 
+				ROW_NUMBER() OVER() as unique_id, 
+				geom,
+				v_dump.gid
+			From
+				(Select rL.gid
+					From %1$s rl , %2$s n
+					Where n.nodetype = ''Dam''
+					AND st_intersects(rl.geom, n.geom)
+					Group By rl.gid 
+					having count(rl.gid) >1)as tt_river,
+				(Select 
+					(ST_DUMP(st_split(st_snap(rl.geom, n.geom, 0.1), n.geom))).geom as geom, rl.gid as gid
+					From %1$s rl , %2$s n
+					Where n.nodetype = ''Dam''
+					AND st_intersects(rl.geom, n.geom))as v_dump
+			Where v_dump.gid = tt_river.gid
+		;', i_river, i_point);
