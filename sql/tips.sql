@@ -19,3 +19,32 @@ with tmp as (
   group by b.gid
 ) select b.gid, st_difference(b.new_geom,coalesce(t.geom, 'GEOMETRYCOLLECTION EMPTY'::geometry)) as newgeom
 from sandbox.vm_mos_2015_parcellaire b left join tmp t on b.gid = t.gid;
+
+						  
+						  
+	--Commit during a function
+drop table data_corentin.test_function ;
+create table data_corentin.test_function 
+(
+	oid serial,
+	libell varchar,
+	constraint pk_test_function primary key (oid)
+);
+
+DO 
+LANGUAGE plpgsql
+$BODY$
+    DECLARE
+	v_test varchar = 'Bonjour';
+    BEGIN
+	For i in 1..100000 LOOP
+	raise notice '%', i;
+		PERFORM dblink_connect('dblk','dbname=sandbox');
+		PERFORM dblink('dblk', format('INSERT INTO data_corentin.test_function(libell) values (''%1$s'')', v_test));
+		PERFORM dblink('dblk','COMMIT;');
+		PERFORM dblink_disconnect('dblk'); 
+	END LOOP;
+    END;
+$BODY$;
+
+
