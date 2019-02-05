@@ -46,5 +46,12 @@ $BODY$
 	END LOOP;
     END;
 $BODY$;
-
-
+					      
+	--Update commune from spatial intersection
+update sandbox.mos_payb_prod3_clean x 
+set code_insee = y.code_insee, nom_commune = y.nom
+From data_exo.communes_pays_brest_bd_topo_2017 y where st_intersects(st_pointonsurface(x.geom), y.geom);
+					      
+	--REset sequence
+ALTER SEQUENCE seq RESTART WITH 1;
+UPDATE t SET idcolumn=nextval('seq');
